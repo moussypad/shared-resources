@@ -240,7 +240,35 @@ Resources:
           Resource: "*"
           Effect: Allow
       Roles: [!Ref CodePipelineTrustRole]
+  CodeBuildProject:
+    # DependsOn: [S3Bucket]
+    Description: AWS CodeBuild project
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: !Sub 
+        - "Building stage for ${tmp}"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        # EnvironmentVariables:
+        #   - Name: S3_BUCKET
+        #     Value: !Ref S3Bucket
+        Image: aws/codebuild/nodejs:7.0.0
+        Type: LINUX_CONTAINER
+      Name: !Sub
+        - "${tmp}-shared-resources-build"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }      
+      ServiceRole: !GetAtt CodeBuildTrustRole.Arn
+      Source:
+        Type: CODEPIPELINE
+      Tags:
+        - Key: domain
+          Value: !Ref DomainName
+      TimeoutInMinutes: 5
   SharedResourcesPipeline:
+    DependsOn: [S3CodePipelineArtifactBucket, CodeBuildProject]
     Description: AWS CodePipeline for shared resources
     Type: AWS::CodePipeline::Pipeline
     Properties:

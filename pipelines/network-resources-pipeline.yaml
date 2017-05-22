@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodePipeline for network resources
+Parameters:
+  DomainName:
+    Description: e.g. example.com
+    Type: String
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<![.-])
+    ConstraintDescription: Must be a valid domain name
+  Template:
+    Type: String
+    Description: Filename for the Cloudformation/SAM template file
+    Default: template.yaml
+  TemplateConfiguration:
+    Type: String
+    Description: Cloudformation config file. Leave empty if no config file is needed
+    Default: beta.json
+  GitHubRepoName:
+    Type: String
+  GitHubRepoBranch:
+    Type: String
+    Default: master
+  GitHubUser:
+    Type: String
+  GitHubToken:
+    NoEcho: true
+    Type: String
+Conditions:
+  HasStagingVariables:
+    !Not
+      - !Equals [!Ref TemplateConfiguration, ""]
+Resources:
+  ProjectPipeline:
+    Description: Creating a deployment pipeline for your project in AWS CodePipeline
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub 
+        - "${tmp}-network-resources-pipeline"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      RoleArn:
+        Fn::ImportValue:
+          !Sub 
+            - "${tmp}-CodePipelineRoleArn"
+            - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: source
+          InputArtifacts: []
+          ActionTypeId:
+            Version: "1"
+            Category: Source
+            Owner: ThirdParty
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: SourceArtifact
+          Configuration:
+            Repo: !Ref GitHubRepoName
+            Branch: !Ref GitHubRepoBranch
+            OAuthToken: !Ref GitHubToken
+            Owner: !Ref GitHubUser
+          RunOrder: 1
+      - Name: Deploy
+        Actions:
+        - Name: create-changeset
+          InputArtifacts:
+          - Name: SourceArtifact
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: "1"
+            Provider: CloudFormation
+          OutputArtifacts: []
+          Configuration:
+            StackName: !Sub 
+              - "${tmp}-network-resources"
+              - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+            ActionMode: CHANGE_SET_REPLACE
+            RoleArn:
+              Fn::ImportValue: 
+                !Sub 
+                  - "${tmp}-CloudformationRoleArn"
+                  - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+            ChangeSetName: pipeline-changeset
+            Capabilities: CAPABILITY_NAMED_IAM
+            TemplatePath: !Sub "SourceArtifact::${Template}"
+            TemplateConfiguration: !If [ HasStagingVariables, !Sub "SourceArtifact::${TemplateConfiguration}", "" ]
+          RunOrder: 1
+        - Name: execute-changeset
+          InputArtifacts: []
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: "1"
+            Provider: CloudFormation
+          OutputArtifacts: []
+          Configuration:
+            StackName: !Sub 
+              - "${tmp}-network-resources"
+              - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+            ActionMode: CHANGE_SET_EXECUTE
+            ChangeSetName: pipeline-changeset
+          RunOrder: 2
+      ArtifactStore:
+        Type: S3
+        Location: 
+          Fn::ImportValue:
+            !Sub 
+              - "${tmp}-S3ArtifactBucket"
+              - { tmp: !Select [0, !Split [".", !Ref DomainName]] }

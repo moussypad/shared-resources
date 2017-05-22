@@ -1,0 +1,346 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Template for shared resources (Network, Roles, Policies)
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Cloudformation Configuration
+        Parameters:
+          - DomainName
+          - Template
+          - TemplateConfiguration
+      -
+        Label:
+          default: GitHub Configuration
+        Parameters:
+          - GitHubRepoName
+          - GitHubRepoBranch
+          - GitHubUser
+          - GitHubToken
+    ParameterLabels:
+      DomainName:
+        default: Domain
+      Template:
+        default: Template
+      TemplateConfiguration:
+        default: Template Configuration  
+      GitHubRepoName:
+        default: Repository
+      GitHubRepoBranch:
+        default: Branch
+      GitHubUser:
+        default: Username
+      GitHubToken:
+        default: Secret
+Parameters:
+  DomainName:
+    Description: e.g example.com
+    Type: String
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<![.-])
+    ConstraintDescription: Must be a valid domain name
+  Template:
+    Type: String
+    Description: Filename for the Cloudformation/SAM template file
+    Default: template.yaml
+  TemplateConfiguration:
+    Type: String
+    Description: Cloudformation config file. Leave empty if no config file is needed
+    Default: beta.json
+  GitHubRepoName:
+    Type: String
+  GitHubRepoBranch:
+    Type: String
+    Default: master
+  GitHubUser:
+    Type: String
+  GitHubToken:
+    NoEcho: true
+    Type: String
+Conditions:
+  HasStagingVariables:
+    !Not
+      - !Equals [!Ref TemplateConfiguration, ""]
+Resources:
+  S3SharedResourcesBucket:
+    Description: AWS S3 bucket for shared resources
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 
+        - "${tmp}-shared-resources-${AWS::AccountId}-${AWS::Region}"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      VersioningConfiguration:
+        Status: Enabled
+  S3SharedResourcesBucketPolicy:
+    Description: AWS S3 bucket policy for denying insecure connection to shared resources bucket
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3SharedResourcesBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Id: SSEAndSSLPolicy
+        Statement:
+        - Sid: DenyInsecureConnections
+          Effect: Deny
+          Principal: "*"
+          Action: s3:*
+          Resource: !Sub "arn:aws:s3:::${S3SharedResourcesBucket}/*"
+          Condition:
+            Bool:
+              aws:SecureTransport: false
+  S3CodePipelineArtifactBucket:
+    Description: AWS S3 bucket for CodePipeline artifacts
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 
+        - "${tmp}-codepipeline-artifact-${AWS::AccountId}-${AWS::Region}"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      VersioningConfiguration:
+        Status: Enabled
+  S3CodePipelineArtifactBucketPolicy:
+    Description: AWS S3 bucket policy for denying insecure connection to codepipeline artifact bucket
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3CodePipelineArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Id: SSEAndSSLPolicy
+        Statement:
+        - Sid: S3CodePipelineArtifactBucket
+          Effect: Deny
+          Principal: "*"
+          Action: s3:*
+          Resource: !Sub "arn:aws:s3:::${S3CodePipelineArtifactBucket}/*"
+          Condition:
+            Bool:
+              aws:SecureTransport: false
+  CodeBuildTrustRole:
+    Description: Service role in IAM for AWS CodeBuild
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 
+        - "${tmp}-codebuild-role"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+          Action: sts:AssumeRole
+      Path: /
+  CodeBuildRolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: CodeBuildTrustRole
+    Description: IAM policy for the service role for AWS CodeBuild
+    Properties:
+      PolicyName: CodeBuildRolePolicy
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Action: ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+          Resource: ["*"]
+        - Effect: Allow
+          Resource: ["*"]
+          Action: ["s3:*"]
+        - Effect: Allow
+          Resource: ["*"]
+          Action: ["kms:GenerateDataKey*", "kms:Encrypt", "kms:Decrypt"]
+        - Effect: Allow
+          Resource: ["*"]
+          Action: ["sns:SendMessage"]
+      Roles: [!Ref CodeBuildTrustRole]
+  CloudFormationTrustRole:
+    Description: Service role in IAM for AWS CloudFormation
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 
+        - "${tmp}-cloudformation-role"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+          Action: sts:AssumeRole
+      Path: /
+  CloudFormationRolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: CloudFormationTrustRole
+    Description: IAM policy for the service role for AWS CloudFormation
+    Properties:
+      PolicyName: CloudFormationRolePolicy
+      PolicyDocument:
+        Statement:
+        - Action: ["s3:GetObject", "s3:GetObjectVersion", "s3:GetBucketVersioning"]
+          Resource: "*"
+          Effect: Allow
+        - Action: ["s3:PutObject"]
+          Resource: ["arn:aws:s3:::codepipeline*"]
+          Effect: Allow
+        - Action: ["lambda:*"]
+          Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+          Effect: Allow
+        - Action: ["apigateway:*"]
+          Resource: !Sub "arn:aws:apigateway:${AWS::Region}::*"
+          Effect: Allow
+        - Action: ["iam:GetRole", "iam:CreateRole", "iam:DeleteRole"]
+          Resource: !Sub 
+            - "arn:aws:iam::${AWS::AccountId}:role/${tmp}-*"
+            - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+          Effect: Allow
+        - Action: ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+          Resource: !Sub 
+            - "arn:aws:iam::${AWS::AccountId}:role/${tmp}-*"
+            - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+          Effect: Allow
+        - Action: ["iam:PassRole"]
+          Resource: ["*"]
+          Effect: Allow
+        - Action: ["cloudformation:CreateChangeSet"]
+          Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
+          Effect: Allow
+      Roles: [!Ref CloudFormationTrustRole]
+  CodePipelineTrustRole:
+    Description: Service role in IAM for AWS CodePipeline
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 
+        - "${tmp}-codepipeline-role"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+          Action: sts:AssumeRole
+      Path: /
+  CodePipelineRolePolicy:
+    Type: AWS::IAM::Policy
+    DependsOn: CodePipelineTrustRole
+    Description: IAM policy for the service role for AWS CodePipeline
+    Properties:
+      PolicyName: CodePipelineRolePolicy
+      PolicyDocument:
+        Statement:
+        - Action: ["s3:GetObject", "s3:GetObjectVersion", "s3:GetBucketVersioning"]
+          Resource: "*"
+          Effect: Allow
+        - Action: ["s3:PutObject"]
+          Resource: ["arn:aws:s3:::codepipeline*"]
+          Effect: Allow
+        - Action: ["codebuild:StartBuild", "codebuild:BatchGetBuilds"]
+          Resource: "*"
+          Effect: Allow
+        - Action: ["cloudwatch:*", "s3:*", "sns:*", "cloudformation:*", "rds:*", "sqs:*", "iam:PassRole"]
+          Resource: "*"
+          Effect: Allow
+        - Action: ["lambda:InvokeFunction", "lambda:ListFunctions"]
+          Resource: "*"
+          Effect: Allow
+      Roles: [!Ref CodePipelineTrustRole]
+  SharedResourcesPipeline:
+    Description: AWS CodePipeline for shared resources
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub 
+        - "${tmp}-shared-resources-pipeline"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+      RoleArn: !GetAtt CodePipelineTrustRole.Arn 
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: source
+          InputArtifacts: []
+          ActionTypeId:
+            Version: "1"
+            Category: Source
+            Owner: ThirdParty
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: SourceArtifact
+          Configuration:
+            Repo: !Ref GitHubRepoName
+            Branch: !Ref GitHubRepoBranch
+            OAuthToken: !Ref GitHubToken
+            Owner: !Ref GitHubUser
+          RunOrder: 1
+      - Name: Build
+        Actions:
+        - Name: build-from-source
+          InputArtifacts:
+          - Name: SourceArtifact
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: "1"
+            Provider: CodeBuild
+          OutputArtifacts:
+          - Name: BuildArtifact
+          Configuration:
+            ProjectName: !Sub 
+              - "${tmp}-shared-resources-build"
+              - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+          RunOrder: 1
+      - Name: Deploy
+        Actions:
+        - Name: create-changeset
+          InputArtifacts:
+          - Name: BuildArtifact
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: "1"
+            Provider: CloudFormation
+          OutputArtifacts: []
+          Configuration:
+            StackName: !Sub "${AWS::StackName}"
+            ActionMode: CHANGE_SET_REPLACE
+            RoleArn: !GetAtt CloudFormationTrustRole.Arn
+            ChangeSetName: !Sub "${AWS::StackName}-changeset"
+            Capabilities: CAPABILITY_NAMED_IAM
+            TemplatePath: !Sub "BuildArtifact::${Template}"
+            TemplateConfiguration: !If [ HasStagingVariables, !Sub "BuildArtifact::${TemplateConfiguration}", "" ]
+          RunOrder: 1
+        - Name: execute-changeset
+          InputArtifacts: []
+          ActionTypeId:
+            Category: Deploy
+            Owner: AWS
+            Version: "1"
+            Provider: CloudFormation
+          OutputArtifacts: []
+          Configuration:
+            StackName: !Sub "${AWS::StackName}"
+            ActionMode: CHANGE_SET_EXECUTE
+            ChangeSetName: !Sub "${AWS::StackName}-changeset"
+          RunOrder: 2
+      ArtifactStore:
+        Type: S3
+        Location: !Ref S3CodePipelineArtifactBucket
+Outputs:
+  # S3CodePipelineArtifactBucket:
+  #   Value: !Ref S3CodePipelineArtifactBucket
+  #   Export:
+  #     Name: !Sub 
+  #       - "${tmp}-S3CodePipelineArtifactBucket"
+  #       - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+  CodeBuildRoleArn:
+    Value: !GetAtt CodeBuildTrustRole.Arn
+    Export:
+      Name: !Sub 
+        - "${tmp}-CodeBuildTrustRole"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+  CodePipelineRoleArn:
+    Value: !GetAtt CodePipelineTrustRole.Arn
+    Export:
+      Name: !Sub 
+        - "${tmp}-CodePipelineRoleArn"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
+  CloudformationRoleArn:
+    Value: !GetAtt CloudFormationTrustRole.Arn
+    Export:
+      Name: !Sub 
+        - "${tmp}-CloudformationRoleArn"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }

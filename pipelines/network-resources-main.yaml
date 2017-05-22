@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodePipeline for network resources
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Cloudformation Configuration
+        Parameters:
+          - DomainName
+          - Template
+          - TemplateConfiguration
+      -
+        Label:
+          default: GitHub Configuration
+        Parameters:
+          - GitHubRepoName
+          - GitHubRepoBranch
+          - GitHubUser
+          - GitHubToken
+    ParameterLabels:
+      DomainName:
+        default: Domain
+      Template:
+        default: Template
+      TemplateConfiguration:
+        default: Template Configuration  
+      GitHubRepoName:
+        default: Repository
+      GitHubRepoBranch:
+        default: Branch
+      GitHubUser:
+        default: Username
+      GitHubToken:
+        default: Secret
+Parameters:
+  DomainName:
+    Description: e.g. example.com
+    Type: String
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<![.-])
+    ConstraintDescription: Must be a valid domain name
+  Template:
+    Type: String
+    Description: Filename for the Cloudformation/SAM template file
+    Default: template.yaml
+  TemplateConfiguration:
+    Type: String
+    Description: Cloudformation config file. Leave empty if no config file is needed
+    Default: beta.json
+  GitHubRepoName:
+    Type: String
+  GitHubRepoBranch:
+    Type: String
+    Default: master
+  GitHubUser:
+    Type: String
+  GitHubToken:
+    NoEcho: true
+    Type: String
+Conditions:
+  HasStagingVariables:
+    !Not
+      - !Equals [!Ref TemplateConfiguration, ""]
+Resources:
+  ProjectPipeline:
+    Description: Creating a deployment pipeline for your project in AWS CodePipeline
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        DomainName: !Ref DomainName
+        Template: !Ref Template
+        TemplateConfiguration: !Ref TemplateConfiguration
+        GitHubRepoName: !Ref GitHubRepoName
+        GitHubRepoBranch: !Ref GitHubRepoBranch
+        GitHubUser: !Ref GitHubUser
+        GitHubToken: !Ref GitHubToken
+      TemplateURL: !Sub 
+        - "https://s3-${AWS::Region}.amazonaws.com/${tmp}-resources/pipelines/network-resources-pipeline.yaml"
+        - { tmp: !Select [0, !Split [".", !Ref DomainName]] }

@@ -263,7 +263,6 @@ Resources:
       ServiceRole: !GetAtt CodeBuildTrustRole.Arn
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Sub "aws s3 sync . s3://${S3SharedResourcesBucket}"
       Tags:
         - Key: domain
           Value: !Ref DomainName

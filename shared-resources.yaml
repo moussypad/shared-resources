@@ -252,9 +252,9 @@ Resources:
         - { tmp: !Select [0, !Split [".", !Ref DomainName]] }
       Environment:
         ComputeType: BUILD_GENERAL1_SMALL
-        # EnvironmentVariables:
-        #   - Name: S3_BUCKET
-        #     Value: !Ref S3Bucket
+        EnvironmentVariables:
+          - Name: S3SharedResourcesBucket
+            Value: !Ref S3SharedResourcesBucket
         Image: aws/codebuild/nodejs:7.0.0
         Type: LINUX_CONTAINER
       Name: !Sub

@@ -5,4 +5,4 @@ phases:
       - aws s3 sync . "s3://${S3SharedResourcesBucket}"
 artifacts:
   files:
-    － shared-resources.yaml
+    - shared-resources.yaml

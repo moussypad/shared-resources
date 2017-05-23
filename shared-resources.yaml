@@ -329,7 +329,7 @@ Resources:
             ChangeSetName: !Sub "${AWS::StackName}-changeset"
             Capabilities: CAPABILITY_NAMED_IAM
             TemplatePath: !Sub "BuildArtifact::${Template}"
-            TemplateConfiguration: !If [ HasConfigVariables, !Sub "BuildArtifact::${TemplateConfiguration}", " " ]
+            TemplateConfiguration: !If [ HasConfigVariables, !Sub "BuildArtifact::${TemplateConfiguration}", !Ref "AWS::NoValue" ]
           RunOrder: 1
         - Name: execute-changeset
           InputArtifacts: []

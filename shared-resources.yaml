@@ -58,14 +58,14 @@ Parameters:
     NoEcho: true
     Type: String
 Conditions:
-  HasStagingVariables:
+  HasConfigVariables:
     !Not
       - !Equals [!Ref TemplateConfiguration, ""]
 Resources:
   S3SharedResourcesBucket:
     Description: AWS S3 bucket for shared resources
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       BucketName: !Sub 
         - "${tmp}-shared-resources-${AWS::AccountId}-${AWS::Region}"
@@ -92,7 +92,7 @@ Resources:
   S3CodePipelineArtifactBucket:
     Description: AWS S3 bucket for CodePipeline artifacts
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     Properties:
       BucketName: !Sub 
         - "${tmp}-codepipeline-artifact-${AWS::AccountId}-${AWS::Region}"
@@ -263,6 +263,7 @@ Resources:
       ServiceRole: !GetAtt CodeBuildTrustRole.Arn
       Source:
         Type: CODEPIPELINE
+        BuildSpec: !Sub "aws s3 sync . s3://${S3SharedResourcesBucket}"
       Tags:
         - Key: domain
           Value: !Ref DomainName
@@ -329,7 +330,7 @@ Resources:
             ChangeSetName: !Sub "${AWS::StackName}-changeset"
             Capabilities: CAPABILITY_NAMED_IAM
             TemplatePath: !Sub "BuildArtifact::${Template}"
-            TemplateConfiguration: !If [ HasStagingVariables, !Sub "BuildArtifact::${TemplateConfiguration}", "" ]
+            TemplateConfiguration: !If [ HasConfigVariables, !Sub "BuildArtifact::${TemplateConfiguration}", " " ]
           RunOrder: 1
         - Name: execute-changeset
           InputArtifacts: []
